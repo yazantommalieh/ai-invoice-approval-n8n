@@ -1,0 +1,11 @@
+file,vendor,invoice_number,invoice_date,currency,subtotal,vat,total,expected_outcome
+invoice_01.pdf,Northwind Cloud Services LLC,NW-2026-0141,2026-10-03,SAR,4200.00,630.00,4830.00,AUTO_APPROVED
+invoice_02.pdf,Desert Courier Co.,DC-88213,2026-10-05,SAR,1850.00,277.50,2127.50,AUTO_APPROVED
+invoice_03.pdf,Pixel & Code Studio,PCS-0907,2026-10-07,AED,12500.00,625.00,13125.00,AUTO_APPROVED
+invoice_04.pdf,Falconry Analytics FZ-LLC,FA-1120,2026-10-09,AED,31000.00,1550.00,32550.00,PENDING_APPROVAL
+invoice_05.pdf,Oasis Office Supplies,OOS-5521,2026-10-11,SAR,640.50,96.08,736.58,AUTO_APPROVED
+invoice_06.pdf,Red Sea Security Ltd,RSS-3390,2026-10-14,SAR,58000.00,8700.00,66700.00,PENDING_APPROVAL
+invoice_07.pdf,Northwind Cloud Services LLC,NW-2026-0141,2026-10-03,SAR,4200.00,630.00,4830.00,DUPLICATE
+invoice_08.pdf,Atlas Translation Bureau,ATB-777,2026-10-18,SAR,2300.00,345.00,2645.00,AUTO_APPROVED
+invoice_09.pdf,Blue Dune Marketing,BDM-2026-45,2026-10-21,AED,8900.00,445.00,9345.00,AUTO_APPROVED
+invoice_10.pdf,Sahara Hardware Trading,SHT-0099,2026-10-25,SAR,0.00,0.00,0.00,NEEDS_REVIEW

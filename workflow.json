@@ -1,0 +1,1601 @@
+{
+  "name": "AI Invoice Approval Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Invoice upload",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Invoice PDF",
+              "fieldType": "file",
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "id": "1677d3d9-7658-439b-9309-214731975838",
+      "name": "On form submission",
+      "webhookId": "b4548fea-7ee5-4267-a9f5-ce0e6543f307"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "Invoice_PDF",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "f4b0d1e0-2588-4d5b-b86d-ad83ded891c9",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Extract the invoice fields from this text. Use only facts in the text.\nIf a field is missing, return null. Do not guess amounts.\n\n{{ $json.text }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": []
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        448,
+        0
+      ],
+      "id": "4e320e88-7b8f-4c8a-9c09-919b2c12cac6",
+      "name": "Basic LLM Chain",
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\"vendor\": \"Acme LLC\", \"invoice_number\": \"INV-001\", \"invoice_date\": \"2026-10-01\",\n \"currency\": \"SAR\", \"subtotal\": 1000.00, \"vat\": 150.00, \"total\": 1150.00}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        304
+      ],
+      "id": "d9a36590-9597-4521-9913-d89fbf7ff61e",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code').item.json.valid }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    },
+                    "id": "1d3baa8a-6fad-4417-ae22-4ddc71b150e8"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs review"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "b8f2f614-7eb8-40d5-ad39-fbca3a82f4de",
+                    "leftValue": "={{ $('Code').item.json.total }}",
+                    "rightValue": 20000,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lte"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Auto approved"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "679527ab-0bba-452e-be46-870395360ba6",
+                    "leftValue": "={{ $('Code').item.json.total }}",
+                    "rightValue": 20000,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Pending approval"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        1488,
+        96
+      ],
+      "id": "c7f6d821-12c5-4541-833c-d40e39d60b81",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const inv = $json.output;\nconst errors = [];\n\nif (!inv.vendor) errors.push(\"missing vendor\");\nif (!inv.invoice_number) errors.push(\"missing invoice number\");\nif (!inv.total || inv.total <= 0) errors.push(\"missing or zero total\");\nif (inv.subtotal && inv.vat && inv.total &&\n    Math.abs(inv.subtotal + inv.vat - inv.total) > 0.05)\n  errors.push(\"subtotal + VAT does not equal total\");\nif (inv.invoice_date && new Date(inv.invoice_date) > new Date())\n  errors.push(\"invoice date in the future\");\n\nconst invoice_key =\n  `${(inv.vendor || \"\").toLowerCase().trim()}|${(inv.invoice_number || \"\").trim()}`;\n\nreturn { json: { ...inv, invoice_key, errors, valid: errors.length === 0 } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        112
+      ],
+      "id": "2d052fe6-3283-4f75-937d-b0860d8a9c83",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\"output\": {\"vendor\": null, \"invoice_number\": null, \"invoice_date\": null,\n            \"currency\": null, \"subtotal\": null, \"vat\": null, \"total\": null}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        704,
+        256
+      ],
+      "id": "96983626-a1cf-4964-bc0c-7192cf5c9d43",
+      "name": "Extraction failed"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "meta-llama/Llama-3.1-8B-Instruct:novita",
+          "mode": "id"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        336,
+        208
+      ],
+      "id": "e9c57106-f913-4c50-b127-a9ca0b7e93bc",
+      "name": "Hugging Face – Llama 3.1 8B",
+      "credentials": {
+        "openAiApi": {
+          "id": "k8GdZKAB5vUMG4dB",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "67f44d76-f60b-4da1-9a3f-79b9180a0f18",
+              "leftValue": "={{ $json.invoice_key }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1232,
+        144
+      ],
+      "id": "e4bc81e6-9dfe-454e-b201-77e9e72cc0dc",
+      "name": "Duplicate?"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "invoices",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "invoice_key",
+              "lookupValue": "={{ $json.invoice_key }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1072,
+        112
+      ],
+      "id": "2dd304c4-7d3e-4eb6-9613-a5919460ef24",
+      "name": "Find existing invoice",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2075250805,
+          "mode": "list",
+          "cachedResultName": "audit",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=2075250805"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "time": "={{ $now.toISO() }}",
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "event": "DUPLICATE",
+            "detail": "Already processed, skipped"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1808,
+        -240
+      ],
+      "id": "5afda6c8-c206-4d86-9221-ced4830a1fd5",
+      "name": "Audit: duplicate",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "p742SkYGRn5NZBa4",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "invoices",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "vendor": "={{ $('Code').item.json.vendor }}",
+            "invoice_number": "={{ $('Code').item.json.invoice_number }}",
+            "invoice_date": "={{ $('Code').item.json.invoice_date }}",
+            "currency": "={{ $('Code').item.json.currency }}",
+            "subtotal": "={{ $('Code').item.json.subtotal }}",
+            "vat": "={{ $('Code').item.json.vat }}",
+            "total": "={{ $('Code').item.json.total }}",
+            "status": "NEEDS_REVIEW",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vendor",
+              "displayName": "vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "subtotal",
+              "displayName": "subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vat",
+              "displayName": "vat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1840,
+        16
+      ],
+      "id": "bea3c9f6-14b6-4765-aa4e-a758b8fd95ac",
+      "name": "Save: needs review",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2075250805,
+          "mode": "list",
+          "cachedResultName": "audit",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=2075250805"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "time": "={{ $now.toISO() }}",
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "event": "=NEEDS_REVIEW",
+            "detail": "={{ $('Code').item.json.errors.join(', ') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2096,
+        48
+      ],
+      "id": "f1a1071f-1c52-4370-adae-14b726b69a4e",
+      "name": "Audit: needs review",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "zaanx91@live.com",
+        "subject": "=Approve invoice {{ $('Code').item.json.invoice_number }}",
+        "message": "=     Vendor: {{ $('Code').item.json.vendor }}\n     Total: {{ $('Code').item.json.currency }} {{ $('Code').item.json.total }}\n     Date: {{ $('Code').item.json.invoice_date }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1632,
+        432
+      ],
+      "id": "77dc836f-55ee-4217-bf38-40081026f700",
+      "name": "Email approval",
+      "webhookId": "37435145-343d-49e6-bf43-c1d5fe935098",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "WUTFkXXjRsg5bImg",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "1cd41218-9227-466b-ae12-a952ee479454",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1840,
+        560
+      ],
+      "id": "7c9dfc48-c9f6-47fe-b35d-8bc507294264",
+      "name": "Approved?"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "invoices",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "vendor": "={{ $('Code').item.json.vendor }}",
+            "invoice_number": "={{ $('Code').item.json.invoice_number }}",
+            "invoice_date": "={{ $('Code').item.json.invoice_date }}",
+            "currency": "={{ $('Code').item.json.currency }}",
+            "subtotal": "={{ $('Code').item.json.subtotal }}",
+            "vat": "={{ $('Code').item.json.vat }}",
+            "total": "={{ $('Code').item.json.total }}",
+            "status": "APPROVED",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vendor",
+              "displayName": "vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "subtotal",
+              "displayName": "subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vat",
+              "displayName": "vat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2144,
+        512
+      ],
+      "id": "a19026fd-62bc-498d-b0f5-b9275ef0af32",
+      "name": "Save: approved",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2075250805,
+          "mode": "list",
+          "cachedResultName": "audit",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=2075250805"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "time": "={{ $now.toISO() }}",
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "event": "=APPROVED",
+            "detail": "=Decision by email"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2400,
+        512
+      ],
+      "id": "bff5f4c7-508c-4ebd-a54c-72370d45e267",
+      "name": "Audit: approved",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "invoices",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "vendor": "={{ $('Code').item.json.vendor }}",
+            "invoice_number": "={{ $('Code').item.json.invoice_number }}",
+            "invoice_date": "={{ $('Code').item.json.invoice_date }}",
+            "currency": "={{ $('Code').item.json.currency }}",
+            "subtotal": "={{ $('Code').item.json.subtotal }}",
+            "vat": "={{ $('Code').item.json.vat }}",
+            "total": "={{ $('Code').item.json.total }}",
+            "status": "REJECTED",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vendor",
+              "displayName": "vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "subtotal",
+              "displayName": "subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vat",
+              "displayName": "vat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2160,
+        688
+      ],
+      "id": "98d8ba9a-af2b-4ca0-ade3-a9445dd22145",
+      "name": "Save: rejected",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2075250805,
+          "mode": "list",
+          "cachedResultName": "audit",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=2075250805"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "time": "={{ $now.toISO() }}",
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "event": "=REJECTED",
+            "detail": "=Decision by email"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2416,
+        688
+      ],
+      "id": "c9f52a3b-8eea-4f67-8fd7-9ee043bab8db",
+      "name": "Audit: rejected",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Invoice PDF → open-weight LLM extraction → validation → duplicate check → routing → approval → audit",
+        "height": 80,
+        "width": 800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -256
+      ],
+      "id": "6e9757bc-6065-4a94-bd8a-cd6cb97f9fe2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "invoices",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "vendor": "={{ $('Code').item.json.vendor }}",
+            "invoice_number": "={{ $('Code').item.json.invoice_number }}",
+            "invoice_date": "={{ $('Code').item.json.invoice_date }}",
+            "currency": "={{ $('Code').item.json.currency }}",
+            "subtotal": "={{ $('Code').item.json.subtotal }}",
+            "vat": "={{ $('Code').item.json.vat }}",
+            "total": "={{ $('Code').item.json.total }}",
+            "status": "AUTO_APPROVED",
+            "updated_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vendor",
+              "displayName": "vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_number",
+              "displayName": "invoice_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_date",
+              "displayName": "invoice_date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "currency",
+              "displayName": "currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "subtotal",
+              "displayName": "subtotal",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vat",
+              "displayName": "vat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "total",
+              "displayName": "total",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "updated_at",
+              "displayName": "updated_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1840,
+        272
+      ],
+      "id": "b5429612-58a4-4d53-918c-53b5a1cab473",
+      "name": "Save: auto approved",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE",
+          "mode": "list",
+          "cachedResultName": "Invoice Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2075250805,
+          "mode": "list",
+          "cachedResultName": "audit",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1UEGDQS2yLo0J1KpqC4jFuqwafMhF57K1ghLtspgUJdE/edit#gid=2075250805"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "time": "={{ $now.toISO() }}",
+            "invoice_key": "={{ $('Code').item.json.invoice_key }}",
+            "event": "=AUTO_APPROVED",
+            "detail": "=Total {{ $('Code').item.json.total }} within limit"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "time",
+              "displayName": "time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "invoice_key",
+              "displayName": "invoice_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "event",
+              "displayName": "event",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detail",
+              "displayName": "detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2080,
+        304
+      ],
+      "id": "d7468978-e8ca-4121-b607-705e2e58273e",
+      "name": "Audit: auto approved",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "zQp5doQ1Mrw820py",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extraction failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Find existing invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Save: needs review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save: auto approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Email approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction failed": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hugging Face – Llama 3.1 8B": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Audit: duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find existing invoice": {
+      "main": [
+        [
+          {
+            "node": "Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save: needs review": {
+      "main": [
+        [
+          {
+            "node": "Audit: needs review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Save: approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save: rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save: approved": {
+      "main": [
+        [
+          {
+            "node": "Audit: approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save: rejected": {
+      "main": [
+        [
+          {
+            "node": "Audit: rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save: auto approved": {
+      "main": [
+        [
+          {
+            "node": "Audit: auto approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b63b96ab-8562-4115-a478-e50afaa3722c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "922196d8fa4c47e22f8b344b700286d39fe39e77de9ab43811086ff6bb1637fa"
+  },
+  "nodeGroups": [],
+  "id": "J2pa49hEjqIxVHvN",
+  "tags": []
+}
